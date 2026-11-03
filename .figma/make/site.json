@@ -1,0 +1,10 @@
+{
+  "description": "PIR sensor dashboard displays current readings and sample time-based trends, helping users monitor motion activity at a glance.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
