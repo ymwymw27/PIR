@@ -1,0 +1,23 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Start Vite dev server",
+            "type": "shell",
+            "command": "if curl -fsS --max-time 2 http://127.0.0.1:8443/ >/dev/null; then printf 'Local: http://localhost:8443/\\n'; else corepack pnpm run dev -- --host 0.0.0.0; fi",
+            "isBackground": true,
+            "problemMatcher": {
+                "owner": "vite",
+                "pattern": {
+                    "regexp": "^(.*)$",
+                    "message": 1
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": ".",
+                    "endsPattern": "Local: http://localhost:8443/"
+                }
+            }
+        }
+    ]
+}

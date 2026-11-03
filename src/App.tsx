@@ -1,6 +1,56 @@
-import type { SVGProps } from "react"
+import { createClient } from "@supabase/supabase-js"
+import { useEffect, useState, type SVGProps } from "react"
 
 type IconProps = SVGProps<SVGSVGElement>
+
+type Reading = {
+  id?: number | string
+  value: number
+  created_at: string
+}
+
+type RealtimeStatus = "connecting" | "connected" | "reconnecting" | "disconnected" | "error"
+
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const supabase =
+  supabaseUrl && supabaseAnonKey
+    ? createClient(supabaseUrl, supabaseAnonKey, {
+        auth: { persistSession: false, autoRefreshToken: false },
+      })
+    : null
+
+function parseReading(row: Record<string, unknown>): Reading | null {
+  const value = Number(row.value)
+  if (!Number.isFinite(value)) return null
+
+  return {
+    ...(typeof row.id === "number" || typeof row.id === "string"
+      ? { id: row.id }
+      : {}),
+    value,
+    created_at:
+      typeof row.created_at === "string"
+        ? row.created_at
+        : new Date().toISOString(),
+  }
+}
+
+function readingKey(reading: Reading) {
+  return reading.id === undefined
+    ? `${reading.created_at}:${reading.value}`
+    : String(reading.id)
+}
+
+function mergeReadings(...groups: Reading[][]) {
+  const unique = new Map<string, Reading>()
+  groups.flat().forEach((reading) => unique.set(readingKey(reading), reading))
+  return [...unique.values()].sort(
+    (first, second) =>
+      new Date(first.created_at).getTime() -
+      new Date(second.created_at).getTime(),
+  )
+}
 
 function ActivityIcon(props: IconProps) {
   return (
@@ -102,48 +152,137 @@ function ClockIcon(props: IconProps) {
   )
 }
 
-const chartPoints = [
-  [0, 100],
-  [36, 100],
-  [44, 99],
-  [51, 57],
-  [58, 100],
-  [105, 100],
-  [113, 74],
-  [121, 100],
-  [172, 100],
-  [180, 34],
-  [189, 100],
-  [237, 100],
-  [245, 62],
-  [254, 100],
-  [292, 100],
-  [300, 45],
-  [309, 100],
-  [358, 100],
-  [366, 67],
-  [374, 100],
-  [425, 100],
-  [433, 81],
-  [441, 100],
-  [493, 100],
-  [501, 38],
-  [510, 100],
-  [557, 100],
-  [565, 52],
-  [574, 100],
-  [621, 100],
-  [629, 72],
-  [638, 100],
-  [680, 100],
-]
-
-const linePath = chartPoints
-  .map(([x, y], index) => `${index === 0 ? "M" : "L"} ${x} ${y}`)
-  .join(" ")
-const areaPath = `${linePath} L 680 132 L 0 132 Z`
-
 export default function App() {
+  const [readings, setReadings] = useState<Reading[]>([])
+  const [realtimeStatus, setRealtimeStatus] =
+    useState<RealtimeStatus>("connecting")
+  const [connectionError, setConnectionError] = useState<string | null>(null)
+  const [historyLoaded, setHistoryLoaded] = useState(false)
+  const currentReading = readings[readings.length - 1] ?? null
+  const currentValue = currentReading?.value ?? null
+  const values = readings.map((reading) => reading.value)
+  const minimum = values.length ? Math.min(...values) : 0
+  const maximum = values.length ? Math.max(...values) : 1
+  const range = maximum - minimum
+  const chartPoints = values.map((value, index) => [
+    values.length === 1 ? 680 : (index / (values.length - 1)) * 680,
+    range === 0 ? 66 : 132 - ((value - minimum) / range) * 132,
+  ])
+  const linePath = chartPoints
+    .map(([x, y], index) => `${index === 0 ? "M" : "L"} ${x} ${y}`)
+    .join(" ")
+  const areaPath = chartPoints.length
+    ? `${linePath} L 680 132 L ${chartPoints[0][0]} 132 Z`
+    : ""
+  const formatValue = (value: number) =>
+    new Intl.NumberFormat(undefined, { maximumSignificantDigits: 6 }).format(
+      value,
+    )
+  const axisMaximum = range === 0 ? maximum + 1 : maximum
+  const axisMinimum = range === 0 ? minimum - 1 : minimum
+  const axisMiddle = (axisMaximum + axisMinimum) / 2
+  const currentPoint = chartPoints[chartPoints.length - 1]
+  const realtimeLabel = {
+    connecting: "연결 중",
+    connected: "실시간 연결",
+    reconnecting: "재연결 중",
+    disconnected: "연결 종료",
+    error: "연결 오류",
+  }[realtimeStatus]
+  const lastUpdated = currentReading
+    ? new Date(currentReading.created_at).toLocaleString()
+    : "데이터 대기 중"
+
+  useEffect(() => {
+    const configuredClient = supabase
+    if (!configuredClient) {
+      setRealtimeStatus("error")
+      setConnectionError(
+        "Supabase 설정을 찾을 수 없습니다. 프로젝트 루트의 .env를 확인하세요.",
+      )
+      return
+    }
+    const client: NonNullable<typeof configuredClient> = configuredClient
+
+    let active = true
+    let loadedHistory = false
+    let loadingHistory = false
+    let pendingReadings: Reading[] = []
+
+    async function loadHistory() {
+      if (loadingHistory) return
+      loadingHistory = true
+      const { data, error } = await client
+        .from("readings")
+        .select("id, value, created_at")
+        .order("created_at", { ascending: false })
+        .limit(100)
+
+      if (!active) return
+      if (error) {
+        setConnectionError(
+          `최신 센서 기록을 불러오지 못했습니다: ${error.message}`,
+        )
+        setRealtimeStatus("error")
+        return
+      }
+
+      const history = (data ?? [])
+        .map((row) => parseReading(row as Record<string, unknown>))
+        .filter((reading): reading is Reading => reading !== null)
+      const merged = mergeReadings(history, pendingReadings).slice(-100)
+      pendingReadings = []
+      loadedHistory = true
+      setReadings(merged)
+      setHistoryLoaded(true)
+      setConnectionError(null)
+    }
+
+    const channel = client
+      .channel("readings-dashboard")
+      .on(
+        "postgres_changes",
+        { event: "INSERT", schema: "public", table: "readings" },
+        (payload) => {
+          const reading = parseReading(payload.new as Record<string, unknown>)
+          if (!reading) return
+
+          if (!loadedHistory) {
+            pendingReadings = [...pendingReadings.slice(-99), reading]
+            return
+          }
+
+          setReadings((current) =>
+            mergeReadings(current, [reading]).slice(-100),
+          )
+        },
+      )
+      .subscribe((status, error) => {
+        if (!active) return
+        if (status === "SUBSCRIBED") {
+          setRealtimeStatus("connected")
+          setConnectionError(null)
+          void loadHistory()
+        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          setRealtimeStatus("error")
+          setConnectionError(
+            `Supabase Realtime 연결 실패${
+              error?.message ? `: ${error.message}` : "."
+            }`,
+          )
+        } else if (status === "CLOSED") {
+          setRealtimeStatus("disconnected")
+        } else {
+          setRealtimeStatus("reconnecting")
+        }
+      })
+
+    return () => {
+      active = false
+      void client.removeChannel(channel)
+    }
+  }, [])
+
   return (
     <div className="min-h-screen bg-[#f5f7f9] text-[#17231f] lg:flex">
       <aside className="hidden w-[248px] shrink-0 border-r border-[#e2e8e5] bg-white px-5 py-7 lg:flex lg:flex-col">
@@ -179,12 +318,18 @@ export default function App() {
         <div className="mt-auto rounded-2xl border border-[#e3ebe7] bg-[#f8faf9] p-4">
           <div className="mb-3 flex items-center justify-between">
             <span className="text-xs font-semibold text-[#51605b]">
-              시스템 상태
+              Supabase 상태
             </span>
-            <span className="size-2 rounded-full bg-[#34a478] shadow-[0_0_0_4px_rgba(52,164,120,0.12)]" />
+            <span
+              className={`size-2 rounded-full ${
+                realtimeStatus === "connected"
+                  ? "bg-[#34a478] shadow-[0_0_0_4px_rgba(52,164,120,0.12)]"
+                  : "bg-[#d19a3b]"
+              }`}
+            />
           </div>
-          <p className="text-sm font-bold text-[#203b32]">모든 시스템 정상</p>
-          <p className="mt-1 text-xs text-[#8a9692]">마지막 확인 1분 전</p>
+          <p className="text-sm font-bold text-[#203b32]">{realtimeLabel}</p>
+          <p className="mt-1 text-xs text-[#8a9692]">readings 테이블 구독</p>
         </div>
       </aside>
 
@@ -197,8 +342,12 @@ export default function App() {
             <span className="text-sm font-bold">SENSE FLOW</span>
           </div>
           <div className="hidden items-center gap-2 text-sm text-[#77847f] lg:flex">
-            <span className="size-2 rounded-full bg-[#34a478]" />
-            실시간 모니터링 중
+            <span
+              className={`size-2 rounded-full ${
+                realtimeStatus === "connected" ? "bg-[#34a478]" : "bg-[#d19a3b]"
+              }`}
+            />
+            {realtimeLabel}
           </div>
           <div className="ml-auto flex items-center gap-3">
             <div className="hidden text-right sm:block">
@@ -225,10 +374,24 @@ export default function App() {
               </p>
             </div>
             <div className="flex w-fit items-center gap-2 rounded-xl border border-[#dde4e1] bg-white px-4 py-2.5 text-sm font-semibold text-[#4f5e59] shadow-sm">
-              <ClockIcon className="size-4 text-[#6f7e79]" />
-              2025년 5월 28일
+              <span
+                className={`size-2 rounded-full ${
+                  realtimeStatus === "connected"
+                    ? "bg-[#34a478]"
+                    : "bg-[#d19a3b]"
+                }`}
+              />
+              Supabase · {realtimeLabel}
             </div>
           </div>
+          {connectionError && (
+            <p
+              className="mb-5 rounded-xl border border-[#f1d5d2] bg-[#fff7f6] px-4 py-3 text-sm text-[#9c443d]"
+              role="alert"
+            >
+              {connectionError}
+            </p>
+          )}
 
           <section
             className="grid gap-5 xl:grid-cols-[1.05fr_1.55fr]"
@@ -244,12 +407,18 @@ export default function App() {
                       현재 센서값
                     </p>
                     <p className="mt-1 text-xs text-white/40">
-                      PIR-01 · 회의실 A
+                      Supabase · readings.value
                     </p>
                   </div>
                   <span className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-[#b8efda] backdrop-blur-sm">
-                    <span className="size-1.5 rounded-full bg-[#67d5a9]" />
-                    ONLINE
+                    <span
+                      className={`size-1.5 rounded-full ${
+                        realtimeStatus === "connected"
+                          ? "bg-[#67d5a9]"
+                          : "bg-white/40"
+                      }`}
+                    />
+                    {realtimeLabel}
                   </span>
                 </div>
 
@@ -264,14 +433,20 @@ export default function App() {
                   <div>
                     <div className="flex items-baseline gap-2">
                       <strong className="text-[72px] font-bold leading-none tracking-[-0.07em] sm:text-[82px]">
-                        1
+                        {currentValue === null
+                          ? "—"
+                          : formatValue(currentValue)}
                       </strong>
                       <span className="text-sm font-medium text-white/50">
-                        HIGH
+                        {currentValue === null ? "" : "최신"}
                       </span>
                     </div>
                     <p className="mt-3 text-lg font-semibold text-[#b8efda]">
-                      움직임 감지됨
+                      {currentValue === null
+                        ? historyLoaded
+                          ? "저장된 센서값이 없습니다"
+                          : "센서값 불러오는 중"
+                        : "readings 테이블 최신 값"}
                     </p>
                   </div>
                 </div>
@@ -279,7 +454,7 @@ export default function App() {
                 <div className="flex items-center justify-between border-t border-white/10 pt-5 text-xs">
                   <span className="text-white/45">마지막 업데이트</span>
                   <span className="font-medium text-white/80">
-                    오늘 14:32:08
+                    {lastUpdated}
                   </span>
                 </div>
               </div>
@@ -289,29 +464,26 @@ export default function App() {
               <article className="rounded-[20px] border border-[#e2e8e5] bg-white p-6 shadow-[0_8px_28px_rgba(34,56,48,0.04)] sm:col-span-1 xl:flex xl:items-center xl:justify-between">
                 <div>
                   <p className="text-sm font-medium text-[#75827d]">
-                    오늘 감지 횟수
+                    그래프 데이터
                   </p>
                   <p className="mt-3 text-[32px] font-bold tracking-[-0.04em] text-[#1d302a]">
-                    128
+                    {readings.length}
                     <span className="ml-1 text-sm font-medium text-[#87938f]">
-                      회
+                      / 100개
                     </span>
                   </p>
                 </div>
-                <span className="mt-4 inline-flex rounded-full bg-[#eaf6f0] px-2.5 py-1 text-xs font-bold text-[#338060] xl:mt-0">
-                  +12.5%
-                </span>
+                <ActivityIcon className="mt-4 size-6 text-[#338060] xl:mt-0" />
               </article>
               <article className="rounded-[20px] border border-[#e2e8e5] bg-white p-6 shadow-[0_8px_28px_rgba(34,56,48,0.04)] sm:col-span-1 xl:flex xl:items-center xl:justify-between">
                 <div>
                   <p className="text-sm font-medium text-[#75827d]">
-                    최근 감지
+                    최신 기록 시각
                   </p>
-                  <p className="mt-3 text-[32px] font-bold tracking-[-0.04em] text-[#1d302a]">
-                    2
-                    <span className="ml-1 text-sm font-medium text-[#87938f]">
-                      분 전
-                    </span>
+                  <p className="mt-3 text-lg font-bold tracking-[-0.04em] text-[#1d302a]">
+                    {currentReading
+                      ? new Date(currentReading.created_at).toLocaleTimeString()
+                      : "—"}
                   </p>
                 </div>
                 <div className="mt-4 flex size-10 items-center justify-center rounded-xl bg-[#f0f4f2] text-[#527066] xl:mt-0">
@@ -321,10 +493,10 @@ export default function App() {
               <article className="rounded-[20px] border border-[#e2e8e5] bg-white p-6 shadow-[0_8px_28px_rgba(34,56,48,0.04)] sm:col-span-1 xl:flex xl:items-center xl:justify-between">
                 <div>
                   <p className="text-sm font-medium text-[#75827d]">
-                    센서 상태
+                    실시간 구독
                   </p>
                   <p className="mt-3 text-[22px] font-bold tracking-[-0.03em] text-[#1d302a]">
-                    정상 작동
+                    {realtimeLabel}
                   </p>
                 </div>
                 <div className="mt-4 flex size-10 items-center justify-center rounded-xl bg-[#eaf6f0] text-[#338060] xl:mt-0">
@@ -338,22 +510,22 @@ export default function App() {
             <div className="flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
               <div>
                 <h2 className="text-lg font-bold tracking-[-0.025em] text-[#1b2e28]">
-                  시간별 움직임 변화
+                  실시간 센서값
                 </h2>
                 <p className="mt-1 text-xs text-[#8a9692]">
-                  최근 24시간 동안의 PIR 센서 감지 기록
+                  Supabase readings 테이블의 최신 value 기록
                 </p>
               </div>
               <div className="rounded-xl bg-[#f3f6f5] px-3.5 py-2 text-xs font-semibold text-[#52645e]">
-                최근 24시간
+                최근 {readings.length} / 100개
               </div>
             </div>
 
             <div className="mt-8 flex min-h-[240px]">
               <div className="flex w-10 shrink-0 flex-col justify-between pb-7 text-[10px] font-medium text-[#9aa49f]">
-                <span>1.0</span>
-                <span>0.5</span>
-                <span>0</span>
+                <span>{formatValue(axisMaximum)}</span>
+                <span>{formatValue(axisMiddle)}</span>
+                <span>{formatValue(axisMinimum)}</span>
               </div>
               <div className="min-w-0 flex-1">
                 <svg
@@ -361,7 +533,7 @@ export default function App() {
                   viewBox="0 0 680 132"
                   preserveAspectRatio="none"
                   role="img"
-                  aria-label="24시간 PIR 움직임 감지 선 그래프"
+                  aria-label="Supabase readings의 최근 100개 센서값 실시간 선 그래프"
                 >
                   <defs>
                     <linearGradient
@@ -420,9 +592,9 @@ export default function App() {
                     vectorEffect="non-scaling-stroke"
                   />
                   <circle
-                    cx="501"
-                    cy="38"
-                    r="4.5"
+                    cx={currentPoint?.[0] ?? 0}
+                    cy={currentPoint?.[1] ?? 66}
+                    r={currentPoint ? "4.5" : "0"}
                     fill="white"
                     stroke="#3f9b77"
                     strokeWidth="2.5"
@@ -430,20 +602,15 @@ export default function App() {
                   />
                 </svg>
                 <div className="mt-3 flex justify-between text-[10px] font-medium text-[#9aa49f]">
-                  <span>00:00</span>
-                  <span>04:00</span>
-                  <span>08:00</span>
-                  <span>12:00</span>
-                  <span>16:00</span>
-                  <span>20:00</span>
-                  <span>24:00</span>
+                  <span>오래된 값</span>
+                  <span>현재</span>
                 </div>
               </div>
             </div>
 
             <div className="mt-2 flex items-center justify-end gap-2 text-xs text-[#6f7d78]">
               <span className="h-0.5 w-5 bg-[#3f9b77]" />
-              PIR 감지값
+              readings.value
             </div>
           </section>
         </div>
