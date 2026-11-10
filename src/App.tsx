@@ -1,5 +1,5 @@
-import { createClient } from "@supabase/supabase-js"
 import { useEffect, useState, type SVGProps } from "react"
+import { supabase } from "./lib/supabase"
 
 type IconProps = SVGProps<SVGSVGElement>
 
@@ -11,14 +11,7 @@ type Reading = {
 
 type RealtimeStatus = "connecting" | "connected" | "reconnecting" | "disconnected" | "error"
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey, {
-        auth: { persistSession: false, autoRefreshToken: false },
-      })
-    : null
+const DEVICE_ID = "lamp-01"
 
 function parseReading(row: Record<string, unknown>): Reading | null {
   const value = Number(row.value)
@@ -213,8 +206,9 @@ export default function App() {
       if (loadingHistory) return
       loadingHistory = true
       const { data, error } = await client
-        .from("readings")
+        .from("sensor_readings")
         .select("id, value, created_at")
+        .eq("device_id", DEVICE_ID)
         .order("created_at", { ascending: false })
         .limit(100)
 
@@ -239,10 +233,15 @@ export default function App() {
     }
 
     const channel = client
-      .channel("readings-dashboard")
+      .channel(`sensor-readings-${DEVICE_ID}`)
       .on(
         "postgres_changes",
-        { event: "INSERT", schema: "public", table: "readings" },
+        {
+          event: "INSERT",
+          schema: "public",
+          table: "sensor_readings",
+          filter: `device_id=eq.${DEVICE_ID}`,
+        },
         (payload) => {
           const reading = parseReading(payload.new as Record<string, unknown>)
           if (!reading) return
@@ -329,7 +328,9 @@ export default function App() {
             />
           </div>
           <p className="text-sm font-bold text-[#203b32]">{realtimeLabel}</p>
-          <p className="mt-1 text-xs text-[#8a9692]">readings 테이블 구독</p>
+          <p className="mt-1 text-xs text-[#8a9692]">
+            sensor_readings · {DEVICE_ID}
+          </p>
         </div>
       </aside>
 
@@ -407,7 +408,7 @@ export default function App() {
                       현재 센서값
                     </p>
                     <p className="mt-1 text-xs text-white/40">
-                      Supabase · readings.value
+                      Supabase · sensor_readings.value
                     </p>
                   </div>
                   <span className="flex items-center gap-2 rounded-full bg-white/10 px-3 py-1.5 text-xs font-semibold text-[#b8efda] backdrop-blur-sm">
@@ -446,7 +447,7 @@ export default function App() {
                         ? historyLoaded
                           ? "저장된 센서값이 없습니다"
                           : "센서값 불러오는 중"
-                        : "readings 테이블 최신 값"}
+                        : "sensor_readings 테이블 최신 값"}
                     </p>
                   </div>
                 </div>
@@ -513,7 +514,7 @@ export default function App() {
                   실시간 센서값
                 </h2>
                 <p className="mt-1 text-xs text-[#8a9692]">
-                  Supabase readings 테이블의 최신 value 기록
+                  Supabase sensor_readings 테이블의 최신 value 기록
                 </p>
               </div>
               <div className="rounded-xl bg-[#f3f6f5] px-3.5 py-2 text-xs font-semibold text-[#52645e]">
@@ -533,7 +534,7 @@ export default function App() {
                   viewBox="0 0 680 132"
                   preserveAspectRatio="none"
                   role="img"
-                  aria-label="Supabase readings의 최근 100개 센서값 실시간 선 그래프"
+                  aria-label="Supabase sensor_readings의 최근 100개 센서값 실시간 선 그래프"
                 >
                   <defs>
                     <linearGradient
@@ -610,7 +611,7 @@ export default function App() {
 
             <div className="mt-2 flex items-center justify-end gap-2 text-xs text-[#6f7d78]">
               <span className="h-0.5 w-5 bg-[#3f9b77]" />
-              readings.value
+              sensor_readings.value
             </div>
           </section>
         </div>

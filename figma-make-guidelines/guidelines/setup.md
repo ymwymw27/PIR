@@ -25,13 +25,14 @@ export const MAX_POINTS = 60;
 ```
 
 ## Supabase
-URL과 anon 키는 `lib/supabase.ts` 상단 상수로 둔다 (수업용). 학생이 자기 프로젝트 값으로 교체.
+URL과 anon 키는 프로젝트 루트의 `.env`에 둔다. `.env.example`을 복사해 실제 프로젝트 값으로 채운다. `VITE_` 접두사는 브라우저에 전달되므로 anon/publishable 키만 사용하고 service role 키는 넣지 않는다.
 
 ```ts
 import { createClient } from '@supabase/supabase-js';
-export const SUPABASE_URL = 'https://<project>.supabase.co';
-export const SUPABASE_ANON_KEY = '<anon key>';
-export const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+export const db = createClient(
+  import.meta.env.VITE_SUPABASE_URL,
+  import.meta.env.VITE_SUPABASE_ANON_KEY,
+);
 ```
 
 ### 테이블 (변경 금지 — ESP32 코드와 공유)
