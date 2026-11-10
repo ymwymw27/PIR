@@ -12,6 +12,8 @@ from serial.tools import list_ports
 from supabase import Client, create_client
 
 BAUD_RATE = 9600
+DEVICE_ID = "lamp-01"
+TABLE_NAME = "sensor_readings"
 
 
 def choose_port() -> str:
@@ -41,16 +43,15 @@ def choose_port() -> str:
         print("목록에 표시된 번호를 입력하세요.")
 
 
-def parse_value(line: str) -> int | float:
-    text = line.strip()
+def parse_value(line: str) -> int:
+    text = line.strip().split(",", maxsplit=1)[0].strip()
     try:
-        value: int | float = int(text)
-    except ValueError:
-        value = float(text)
-
-    if not math.isfinite(value):
-        raise ValueError("값은 유한한 숫자여야 합니다.")
-    return value
+        numeric_value = float(text)
+    except ValueError as error:
+        raise ValueError("첫 번째 센서값이 숫자가 아닙니다.") from error
+    if not math.isfinite(numeric_value) or not numeric_value.is_integer():
+        raise ValueError("첫 번째 센서값은 유효한 정수여야 합니다.")
+    return int(numeric_value)
 
 
 def create_supabase_client() -> Client:
@@ -93,7 +94,9 @@ def upload_readings(port_name: str, client: Client) -> None:
                 continue
 
             try:
-                client.table("readings").insert({"value": value}).execute()
+                client.table(TABLE_NAME).insert(
+                    {"device_id": DEVICE_ID, "value": value}
+                ).execute()
             except (APIError, httpx.HTTPError) as error:
                 print(f"Supabase 저장 실패 (value={value}): {error}", file=sys.stderr)
                 continue
@@ -103,7 +106,9 @@ def upload_readings(port_name: str, client: Client) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Arduino 시리얼 값을 Supabase readings 테이블에 저장합니다."
+        description=(
+            "Arduino 시리얼 값을 Supabase sensor_readings 테이블에 저장합니다."
+        )
     )
     parser.add_argument(
         "--port",

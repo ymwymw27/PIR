@@ -14,18 +14,21 @@ type RealtimeStatus = "connecting" | "connected" | "reconnecting" | "disconnecte
 const DEVICE_ID = "lamp-01"
 
 function parseReading(row: Record<string, unknown>): Reading | null {
-  const value = Number(row.value)
-  if (!Number.isFinite(value)) return null
+  if (row.device_id !== DEVICE_ID) return null
+  if (typeof row.value !== "number" || !Number.isFinite(row.value)) return null
+  if (
+    typeof row.created_at !== "string" ||
+    !Number.isFinite(Date.parse(row.created_at))
+  ) {
+    return null
+  }
 
   return {
     ...(typeof row.id === "number" || typeof row.id === "string"
       ? { id: row.id }
       : {}),
-    value,
-    created_at:
-      typeof row.created_at === "string"
-        ? row.created_at
-        : new Date().toISOString(),
+    value: row.value,
+    created_at: row.created_at,
   }
 }
 
@@ -425,7 +428,11 @@ export default function App() {
 
                 <div className="my-auto flex items-center gap-6 py-8">
                   <div className="relative flex size-[114px] shrink-0 items-center justify-center">
-                    <span className="absolute inset-0 animate-pulse rounded-full bg-[#75d6af]/10" />
+                    <span
+                      className={`absolute inset-0 rounded-full bg-[#75d6af]/10 ${
+                        currentReading ? "animate-pulse" : ""
+                      }`}
+                    />
                     <span className="absolute inset-[14px] rounded-full border border-[#75d6af]/25" />
                     <div className="relative flex size-[66px] items-center justify-center rounded-full bg-[#75d6af] text-[#12382f] shadow-[0_0_34px_rgba(117,214,175,0.3)]">
                       <SensorIcon className="size-9" />
