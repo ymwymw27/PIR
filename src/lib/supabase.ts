@@ -1,11 +1,11 @@
 import { createClient } from "@supabase/supabase-js"
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+export const SUPABASE_URL = "https://<project>.supabase.co"
+export const SUPABASE_ANON_KEY = "<anon key>"
+export const DEMO_MODE = SUPABASE_URL.includes("<project>")
 
-export const supabase =
-  supabaseUrl && supabaseAnonKey
-    ? createClient(supabaseUrl, supabaseAnonKey, {
-        auth: { persistSession: false, autoRefreshToken: false },
-      })
-    : null
+export const db = DEMO_MODE
+  ? null
+  : createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    })
