@@ -1,5 +1,5 @@
 {
-  "description": "PIR sensor dashboard displays current readings and sample time-based trends, helping users monitor motion activity at a glance.",
+  "description": "A setup and deployment verification tool that helps developers bootstrap imported projects and prepare reliable production and preview deployments.",
   "robots": {
     "index": false
   },
