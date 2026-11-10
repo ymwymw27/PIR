@@ -29,7 +29,7 @@ export default function SensorMoon({ reading, power }: Props) {
         aria-label={power ? `조명 밝기 ${levelPercent}%` : "조명 꺼짐"}
       >
         <img
-          src="/images/GTA-6-Logo-PNG-from-Grand-Theft-Auto-VI-Transparent.png"
+          src={`${import.meta.env.BASE_URL}images/GTA-6-Logo-PNG-from-Grand-Theft-Auto-VI-Transparent.png`}
           alt=""
         />
       </div>
