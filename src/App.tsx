@@ -210,7 +210,7 @@ export default function App() {
       loadingHistory = true
       const { data, error } = await client
         .from("sensor_readings")
-        .select("id, value, created_at")
+        .select("id, device_id, value, created_at")
         .eq("device_id", DEVICE_ID)
         .order("created_at", { ascending: false })
         .limit(100)
